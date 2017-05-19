@@ -68,10 +68,13 @@ int main(int argc, char **argv)
         return  1;
     }
 
+    /*
 	if( sfinfo.samplerate != 48000 ) {
 		printf("Input rate must be 48K.\n");
 		return 1;
-	}
+	}*/
+	
+	double tempsamplerate = sfinfo.samplerate;
 
 	FileFreqTiming = open(outfilename, O_WRONLY|O_CREAT, 0644);
 
@@ -97,7 +100,8 @@ int main(int argc, char **argv)
 				x /= 2 ;
 			}
 			//printf("%f \n",x);
-			WriteTone(x*Excursion*2.0,1e9/48000.0);
+			//WriteTone(x*Excursion*2.0,1e9/48000.0);
+			WriteTone(x*Excursion*2.0,1e9/(tempsamplerate*1.0));
 		}
 	}
 

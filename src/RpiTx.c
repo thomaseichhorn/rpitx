@@ -243,14 +243,14 @@ int SetupGpioClock(uint32_t SymbolRate,double TuningFrequency)
 	if((FreqDividerPCM>4096)||(FreqDividerPCM<2)) printf("Warning : SampleRate is not valid\n"); 
 	clk_reg[PCMCLK_DIV] = 0x5A000000 | ((FreqDividerPCM)<<12) | FreqFractionnalPCM;
 	udelay(1000);
-	//printf("Div PCM %d FracPCM %d\n",FreqDividerPCM,FreqFractionnalPCM);
+	printf("Div PCM %d FracPCM %d\n",FreqDividerPCM,FreqFractionnalPCM);
 	
 	 DelayFromSampleRate=(1e9/(SymbolRate));
 			
 	pcm_reg[PCM_TXC_A] = 0<<31 | 1<<30 | 0<<20 | 0<<16; // 1 channel, 8 bits
 	udelay(100);
 	
-	//printf("Nb PCM STEP (<1000):%d\n",NbStepPCM);
+	printf("Nb PCM STEP (<1000):%d\n",NbStepPCM);
 	pcm_reg[PCM_MODE_A] = (NbStepPCM-1)<<10; // SHOULD NOT EXCEED 1000 !!!
 	udelay(100);
 	pcm_reg[PCM_CS_A] |= 1<<4 | 1<<3;		// Clear FIFOs
@@ -782,6 +782,7 @@ int pitx_SetTuneFrequency(double Frequency)
 {
 	#define MAX_HARMONIC 41
 	int harmonic;
+	printf("Setting tuning frequency, input %f Hz\n",Frequency);
 	
 	if(Frequency<PLL_FREQ_1GHZ/2048L) //2/4096-> For very Low Frequency we used 19.2 MHZ PLL 
 	{
@@ -798,7 +799,7 @@ int pitx_SetTuneFrequency(double Frequency)
 		
 	for(harmonic=1;harmonic<MAX_HARMONIC;harmonic+=2)
 	{
-		//printf("->%lf harmonic %d\n",(TuneFrequency/(double)harmonic),harmonic);
+		printf("->%f harmonic %d\n",(Frequency/(double)harmonic),harmonic);
 		if((Frequency/(double)harmonic)<=(double)PllUsed/4.0) break;
 	}
 	HarmonicNumber=harmonic;	
@@ -855,6 +856,7 @@ int main(int argc, char* argv[])
 			break;
 		case 'f': // Frequency
 			SetFrequency = atof(optarg);
+			printf ("SetFreq: %e kHz\n",SetFrequency);
 			break;
 		case 'm': // Mode (IQ,IQFLOAT,RF,RFA)
 			if(strcmp("IQ",optarg)==0) Mode=MODE_IQ;
