@@ -3,50 +3,33 @@
 #include <cstdio>
 #include <cmath>
 #include <signal.h>
+#include <unistd.h>
 
-#include "common/wave.h"
-#include "ft8/pack.h"
-#include "ft8/encode.h"
-#include "ft8/pack_77.h"
-#include "ft8/encode_91.h"
+#include "ft8_lib/common/wave.h"
+#include "ft8_lib/ft8/pack.h"
+#include "ft8_lib/ft8/encode.h"
+#include "ft8_lib/ft8/constants.h"
 
 #include "../librpitx/src/librpitx.h"
 
 bool running=true;
 
-// Convert a sequence of symbols (tones) into a sinewave of continuous phase (FSK).
-// Symbol 0 gets encoded as a sine of frequency f0, the others are spaced in increasing
-// fashion.
-void synth_fsk(const uint8_t *symbols, int num_symbols, float f0, float spacing, 
-                float symbol_rate, float signal_rate, float *signal) {
-    float phase = 0;
-    float dt = 1/signal_rate;
-    float dt_sym = 1/symbol_rate;
-    float t = 0;
-    int j = 0;
-    int i = 0;
-    while (j < num_symbols) {
-        float f = f0 + symbols[j] * spacing;
-        phase += 2 * M_PI * f / signal_rate;
-        signal[i] = sin(phase);
-        t += dt;
-        if (t >= dt_sym) {
-            // Move to the next symbol
-            t -= dt_sym;
-            ++j;
-        }
-        ++i;
-    }
-}
-
+#define PROGRAM_VERSION "0.1"
 
 void usage() {
-    printf("Generate a 15-second WAV file encoding a given message.\n");
-    printf("Usage:\n");
-    printf("\n");
-    printf("gen_ft8 MESSAGE WAV_FILE\n");
-    printf("\n");
-    printf("(Note that you might have to enclose your message in quote marks if it contains spaces)\n");
+    fprintf(stderr,\
+"\npift8 -%s\n\
+Usage:\npift8  [-m Message][-f Frequency][-p ppm][-o offset][-s slot][-r] [-h] \n\
+-m message to transmit (13 caracters)\n\
+-f float      frequency carrier Hz(50 kHz to 1500 MHz),\n\
+-p set clock ppm instead of ntp adjust\n\
+-o set frequency offset(0-2500Hz) default:1240\n\
+-s set time slot to transmit 0 or 1 (2 is always)\n\
+-r repeat (every 15s)\n\
+-h            help (this help).\n\
+Example : sudo pift8 -m \"CQ CA0ALL JN06\" -f 14.074e6\n\
+\n",\
+PROGRAM_VERSION);
 }
 
 
@@ -58,20 +41,102 @@ terminate(int num)
    
 }
 
+void wait_every(
+  int seconds, int slot
+) {
+  time_t t;
+  struct tm* ptm;
+  for(;running;){
+    time(&t);
+    ptm = gmtime(&t);
+    if( ((ptm->tm_sec) % seconds)==slot ) break;
+    usleep(1000);
+  }
+  //usleep(400000); // wait another second
+}
+
 int main(int argc, char **argv) {
-    // Expect two command-line arguments
-    if (argc < 3) {
-        usage();
-        return -1;
-    }
+    
+   
+    int a;
+	int anyargs = 0;
 
-    const char *message = argv[1];
-    const char *wav_path = argv[2];
+    float frequency=14.07e6;
+    float ppm=1000;
+    const char *message="CQ";
+    bool repeat=false;
+    int slot=0;
+    float offset=1240;
+    float RampRatio=0;
+    while(1)
+	{
+		a = getopt(argc, argv, "m:f:p:hro:s:e:");
+	
+		if(a == -1) 
+		{
+			if(anyargs) break;
+			else a='h'; //print usage and exit
+		}
+		anyargs = 1;	
 
-    // First, pack the text data into 72-bit binary message
-    uint8_t packed[10];
+		switch(a)
+		{
+
+        case 'm': // message
+			message = optarg;
+            fprintf(stderr,"Message %s\n ",message);
+			break;
+		    
+		case 'f': // Frequency
+			frequency = atof(optarg);
+			break;
+		
+		case 'p': //ppm
+			ppm=atof(optarg);
+			break;	
+		case 'h': // help
+			usage();
+			exit(1);
+			break;
+        case 'r': // repeat
+			repeat=true;
+			break;
+        case 's': // time slot
+			slot=atoi(optarg);
+            fprintf(stderr,"slot=%d\n",slot);
+			break;
+        case 'o': // frequency offset
+			offset=atof(optarg);
+			break;
+        case 'e': // Ramp Ratio (0..1)
+			RampRatio=atof(optarg);
+			break;            
+		case -1:
+        	break;
+		case '?':
+			if (isprint(optopt) )
+ 			{
+ 				fprintf(stderr, "pift8: unknown option `-%c'.\n", optopt);
+ 			}
+			else
+			{
+				fprintf(stderr, "pift8: unknown option character `\\x%x'.\n", optopt);
+			}
+			usage();
+
+			exit(1);
+			break;			
+		default:
+			usage();
+			exit(1);
+			break;
+		}/* end switch a */
+	}/* end while getopt() */
+    
+    // First, pack the text data into binary message
+    uint8_t packed[ft8::K_BYTES];
     //int rc = packmsg(message, packed);
-    int rc = ft8_v2::pack77(message, packed);
+    int rc = ft8::pack77(message, packed);
     if (rc < 0) {
         printf("Cannot parse message!\n");
         printf("RC = %d\n", rc);
@@ -85,23 +150,15 @@ int main(int argc, char **argv) {
     printf("\n");
 
     // Second, encode the binary message as a sequence of FSK tones
-    uint8_t tones[NN];          // NN = 79, lack of better name at the moment
+    uint8_t tones[ft8::NN];          // FT8_NN = 79, lack of better name at the moment
     //genft8(packed, 0, tones);
-    ft8_v2::genft8(packed, tones);
+    ft8::genft8(packed, tones);
 
     printf("FSK tones: ");
-    for (int j = 0; j < NN; ++j) {
+    for (int j = 0; j < ft8::NN; ++j) {
         printf("%d", tones[j]);
     }
     printf("\n");
-
-    // Third, convert the FSK tones into an audio signal
-    const int num_samples = (int)(0.5 + NN / 6.25 * 12000);
-    const int num_silence = (15 * 12000 - num_samples) / 2;
-    float signal[num_silence + num_samples + num_silence];
-    for (int i = 0; i < num_silence + num_samples + num_silence; i++) {
-        signal[i] = 0;
-    }
 
     for (int i = 0; i < 64; i++) {
         struct sigaction sa;
@@ -111,17 +168,51 @@ int main(int argc, char **argv) {
         sigaction(i, &sa, NULL);
     }
 
-    ngfmdmasync fmmod(14.070e6,6.25*10000,14,1000);
-	padgpio pad;
-	pad.setlevel(7);// Set max power
+    
+    int Upsample=100;
+    int FifoSize=ft8::NN;
+    float Deviation=6.25;
+    dbg_setlevel(1);
 
-	float VCOFreq[10000];
-    for(size_t i=0;(i<NN)&&running;i++)
+    fskburst fsk(frequency+offset, 6.25, Deviation, 14, FifoSize,Upsample,RampRatio);
+    if(ppm!=1000)
+    {	//ppm is set else use ntp
+			fsk.Setppm(ppm);
+            fsk.SetCenterFrequency(frequency,50);            
+    }    
+	//padgpio pad;
+	//pad.setlevel(7);// Set max power
+
+	unsigned char Symbols[FifoSize];
+    
+    for(size_t i=0;(i<ft8::NN)&&running;i++)
     {
-		for(int j=0;j<10000;j++) VCOFreq[j]=6.25*(float)tones[i];
-		fmmod.SetFrequencySamples(VCOFreq,10000);
-	    fprintf(stderr,"Freq %f\n",VCOFreq[i]);
+		//for(int j=0;j<Upsample;j++)
+             Symbols[i]=tones[i];
+        
+           
+		
+	    //fprintf(stderr,"Freq %f\n",Symbols[i]);
     }
-     
-    return 0;
+    fprintf(stderr,"Wait next slot\n");
+    if(slot<2)
+        wait_every(30,slot*15);
+    else
+        wait_every(15,0);
+    do
+    {
+        if(!running) exit(0);
+        fprintf(stderr,"Tx!\n");
+        fsk.SetSymbols(Symbols, (ft8::NN));
+        fsk.stop();
+        fprintf(stderr,"End of Tx\n");
+        if(repeat)
+        {
+            fprintf(stderr,"Wait next slot\n");
+            if(slot<2)
+             wait_every(30,slot*15);
+            else
+              wait_every(15,0);
+        }    
+    }  while(repeat&&running);  
 }
